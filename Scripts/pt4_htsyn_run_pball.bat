@@ -1,0 +1,1 @@
+python "P:\_research group folders\PT Proteins\PT4\_HTsyn script\pt4_htsyn.py"
