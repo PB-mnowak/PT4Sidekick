@@ -1,5 +1,4 @@
 # Get protein data if ID given
-# Error when file is open
 # Log: adding stocks - protein / stock / location
 # Tag detection
 
@@ -20,16 +19,17 @@ import warnings
 # Main menu
 
 def run_menu():
-    
     system('cls')
-    
     global token
     global pb_all
     global debug_mode 
     
-    debug_mode = True
-    token = get_token()
-    pb_all = 'P:\\_research group folders\\PT Proteins\\PT4\\_HTsyn script'
+    debug_mode = False
+    # token = get_token()
+    token = '3adfe55932a1244482a1066d1826006963612b37'
+    print(token)
+    # token = None
+    pb_all = 'P:\\_research group folders\\PT Proteins\\PT4\\_PT4_sidekick'
 
     warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
@@ -215,8 +215,14 @@ def get_token(token = None):
         print("\nEnter LabGuru credentials: name (n.surname) and password")
         while True:
             
-            name = str(input("Name: ")).lower() + "@purebiologics.com"
-            password = str(getpass("Password: "))
+            # name = str(input("Name: ")).lower() + "@purebiologics.com"
+            # password = str(getpass("Password: "))
+            if debug_mode is True:
+                name = 'LG_User1@purebiologics.com'
+                password = 'LG_user1'
+            else:
+                name = 'm.nowak@purebiologics.com'
+                password = 'xENosPB2022@'
             
             body = {"login": name, "password": password}
             
@@ -253,10 +259,10 @@ def scan_storage(token, storage_id):
     page = requests.get(url)
     
     storage = page.json()
-    boxes_name = {box['name']: box['id'] for box in storage['boxes'] if box['id'] != "1004"}
-    boxes_id = {box['id']: box['name'] for box in storage['boxes'] if box['id'] != "1004"}
+    boxes_str = {box['name']: box['id'] for box in storage['boxes'] if box['id'] != 1004}
+    boxes_id = {box['id']: box['name'] for box in storage['boxes'] if box['id'] != 1004}
 
-    return boxes_name, boxes_id
+    return boxes_str, boxes_id
 
 def get_box_data(token: str, box_id: str): # token
     '''
@@ -320,7 +326,7 @@ def add_stock(stock_data):
 @print_task
 def generate_template():
     """ Create copy of template file stored on PB_all """
-    template_file = "HTsyn_template.xlsx"
+    template_file = "Templates\\HTsyn_template.xlsx"
     pball_connection(template_file)
     
     name = input('Name of the template file: ') + ".xlsx"
@@ -619,15 +625,17 @@ def create_import_file():
     
     task_start(file)
     
-    template_file = "LG_stock_transfer.xlsx"
+    template_file = "Templates\LG_stock_transfer.xlsx"
     pball_connection(template_file)
     
     plasmids, boxes = load_pl_transfer(token, mypath, file)
-    transfer_wb = load_workbook(join(pb_all, 'LG_stock_transfer.xlsx'))
+    transfer_wb = load_workbook(join(pb_all, template_file))
     ws = transfer_wb['Sheet1']
     
+    # TODO Refactor - variable names
+    
     for i, (stock_id, stock_data) in enumerate(plasmids.items(), 2):
-               
+
         box_name = stock_data['box_name']
         ws.cell(row=i, column=1).value = stock_id
         ws.cell(row=i, column=2).value = stock_data['name']
@@ -667,106 +675,165 @@ def open_import_lg():
     system('explorer "https://my.labguru.com/system/json_imports/class=System%3A%3AStorage%3A%3AStock"')
     print('\nTransfer import file to LabGuru import page')
 
-def load_pl_transfer(token, path, file):
+def load_pl_transfer(token, mypath, file):
     """ Creates dict with stock: data necessary for transfer """
+
+    def find_pos(boxes_data, box_name):
+        if boxes_data[box_name]['free_pos']:
+            position = boxes_data[box_name]['free_pos'].pop(0)
+            return position
+        else:
+            position = None
+            return position
     
-    # TODO
-    def check_positions(token, b):
-        pass
+    # Checks if box data is loaded into boxes_data and loads it if not
+    def update_box_data(boxes_data, box_name, box_id):
+        free_pos = boxes_data[box_name].get('free_pos', -1)
+        if free_pos == -1:
+            box_update = get_box_data(token, box_id)
+            boxes_data[box_name].update(box_update)
+
+    # Add 
+    def add_stock_position(boxes_data, boxes_str, boxes_id, position, box_name):
+        
+        box_name, box_id = switch_to_id(boxes_id, boxes_str, box_name)
+        
+        # Convert box position to int
+        if isinstance(position, str):
+            position = pos_to_int(position)
+        
+        # Box and position given
+        if box_name is not None and position is not None:
+            update_box_data(boxes_data, box_name, box_id)
+            if position in boxes_data[box_name]['free_pos']:
+                boxes_data[box_name]['free_pos'].remove(position)
+                return box_name, position
+        
+        # Only box given or given position unavailable
+        if box_name is not None:
+            update_box_data(boxes_data, box_name, box_id)
+            position = find_pos(boxes_data, box_name)
+            if position is not None:
+                return box_name, position
+
+        # Find box with free position         
+        else:
+            for box in boxes_str.keys():
+                box_id = boxes_str[box]
+                update_box_data(boxes_data, box, box_id)
+                position = find_pos(boxes_data, box)
+                if position is not None:
+                    return box, position
     
-    def find_new_box(boxes_dict):
-        for box_name in boxes_dict:
-            positions = boxes_dict[box_name].get('free_pos', False)
-            if positions is False:
-                    box_id = boxes_dict[box_name]['id']
-                    boxes_dict[box_name].update(get_box_data(token, box_id))
-                    positions = boxes_dict[box_name].get('free_pos', False)
-            if positions:
-                box_name = boxes_dict[box_name]['name']
-                box_position = boxes_dict[box_name]['free_pos'].pop(0)
-                return box_name, box_position
-        return None, None
+    def transfer_validation(row):
+        '''
+        Validate row for sample transfer
+        '''
+        transfer = row[pl_header['Transfer'] - 1]
+        
+        cond_id = row[pl_header['ID'] - 1] is not None
+        cond_transfer_str = isinstance(transfer, str)
+        cond_transfer_y = False
+        if cond_transfer_str:
+            cond_transfer_y = transfer.upper() == "Y"
+            
+        conditions = [
+            cond_id,
+            cond_transfer_str,
+            cond_transfer_y,
+            ]
+        return all(conditions)
     
-    wb = load_workbook(join(path, file))
+    def switch_to_id(boxes_id, boxes_str, box_name):
+        '''
+        Returns name and id of box
+        '''
+        if isinstance(box_name, int):
+            try:
+                box_name, box_id = boxes_id[box_id], box_name
+            except KeyError:
+                print(f'{box_id} not matching any box ID in Z23.C storage')
+                box_name, box_id = None, None
+        elif isinstance(box_name, str):
+            try:
+                box_id = boxes_str[box_name]
+            except KeyError:
+                print(f'{box_name} not found in Z23.C storage')
+                box_name, box_id = None, None
+        else:
+            box_name, box_id = None, None
+            
+        return box_name, box_id
+    
+    
+    wb = load_workbook(join(mypath, file))
     ws_plasmids = wb['Plasmids']
     pl_header = sheet_header(ws_plasmids[1])
     
+    # Dicts changing box name>id and id>name
     boxes_str, boxes_id = scan_storage(token, '1796')
-    boxes = {box_name: {'id': box_id} for box_name, box_id in boxes_str.items()}
+    boxes_list = sorted(list(boxes_str.items()), key=lambda x: x[0])
+    boxes_data = {box_name: {'id': box_id} for box_name, box_id in boxes_list}
+
     stocks = {}
     i = 1
     
-    for row in ws_plasmids.iter_rows(min_row=2, max_row=101, min_col=1, values_only=True):
+    for row in ws_plasmids.iter_rows(
+        min_row=2,
+        max_row=101,
+        min_col=1,
+        values_only=True
+        ):
+        
         i += 1
-        if row[pl_header['ID'] - 1] is not None:
+
+        if transfer_validation(row):
 
             stock_id = row[pl_header['ID'] - 1]
             stock_name = row[pl_header['Stock name (Plasmid)'] - 1]
             plasmid_sysid = row[pl_header['SysID'] - 1]
             plasmid_name = row[pl_header['Plasmid inventory name'] - 1]
             box_name = row[pl_header['New Box'] - 1]
-            box_position = row[pl_header['New Position'] - 1]
+            position = row[pl_header['New Position'] - 1]
 
-            # TODO - refactor
-            if type(box_position) == str:
-                box_position = pos_to_int(box_position)
-
-            if box_name is not None:
-                # Get box ID if name is given
-                if str(box_name).isdigit():
-                    box_id = int(box_name)
-                    box_name = boxes_id[box_id]
-                else:
-                    box_id = boxes_str[box_name]
-                
-                if box_name not in boxes:
-                    boxes[box_name] = {}
-                    boxes[box_name]['id'] = boxes_str[box_name]
-                    box_data = get_box_data(token, box_id)
-                    boxes[box_name].update(box_data)
-                
-                if box_position is None:
-                    positions = boxes[box_name].get('free_pos', False)
-                    if positions is False:
-                        box_id = boxes[box_name]['id']
-                        boxes[box_name].update(get_box_data(token, box_id))
-                    if boxes[box_name]['free_pos']:
-                        box_position = boxes[box_name]['free_pos'].pop(0)
-                    else:
-                        box_name, box_position = find_new_box(boxes)
+            box_name, position = add_stock_position(
+                boxes_data,
+                boxes_str,
+                boxes_id,
+                position,
+                box_name
+                )
+            
+            if box_name is None or position is None:
+                print(f'No position found for stock {stock_name}')
+                continue
+            
             else:
-                box_name, box_position = find_new_box(boxes)
-                
-                # No box/position found
-                if box_name is None and box_position is None:
-                    continue # TODO
-            
-            stock_data = {
-                'name': stock_name,
-                'box_name': box_name,
-                'box_id': boxes[box_name]['id'],
-                'stock_pos': box_position,
-                'sysid': plasmid_sysid,
-                'inventory_name': plasmid_name,     
-            }
+                stock_data = {
+                    'name': stock_name,
+                    'box_name': box_name,
+                    'box_id': boxes_data[box_name]['id'],
+                    'stock_pos': position,
+                    'sysid': plasmid_sysid,
+                    'inventory_name': plasmid_name,     
+                    }
 
-            stocks[stock_id] = stock_data
-            
-            ws_plasmids.cell(
-                row=i,
-                column=pl_header['New Box']
-                ).value = box_name
-            ws_plasmids.cell(
-                row=i,
-                column=pl_header['New Position']
-                ).value = pos_to_str(box_position)
-            
-        else:
-            continue
-        
-    wb.save(join(path, file))
+                stocks[stock_id] = stock_data
+                
+                ws_plasmids.cell(
+                    row=i,
+                    column=pl_header['New Box']
+                    ).value = box_name
+                ws_plasmids.cell(
+                    row=i,
+                    column=pl_header['New Position']
+                    ).value = pos_to_str(position)
+
+    print(f'{len(stocks)} stocks ready for transfer')
+
+    save_workbook(wb, mypath, file)
     wb.close()
-    return [stocks, boxes]
+    return [stocks, boxes_data]
 
 
 # 5) Add proteins and stocks
@@ -778,7 +845,7 @@ def add_pt_stocks():
     if file is None:
         return None
     
-    wb = load_workbook(join(mypath, file), data_only=True)
+    wb = load_workbook(join(mypath, file))
     ws_proteins = wb['Proteins']
     pt_header= sheet_header(ws_proteins[1])
     
