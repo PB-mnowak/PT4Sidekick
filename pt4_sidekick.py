@@ -11,8 +11,9 @@ from Data.pt4_protein import Protein
 from Data.pt4_data import protein_db, lg_units
 from openpyxl import load_workbook, Workbook
 
-import json
-import time
+# import json
+import re
+# import time
 import requests
 import warnings
 
@@ -407,26 +408,50 @@ def get_plasmid_data():
         plasmid_name = record_json["stockable"]["name"]
         plasmid_sysid = get_sysid_pl(plasmid_id)
         prot_name = plasmid_name.split('_')[1]
+        concentration = float(record_json["concentration"])
+        volume = record_json['volume']
+        description = record_json["description"]
         
-        ws_plasmids.cell(
-            column=pl_header['Stock name (Plasmid)'], 
-            row=i
-            ).value = plasmid_name
-        ws_plasmids.cell(
-            column=pl_header['Conc'],
-            row=i
-            ).value = float(record_json["concentration"])
+        if description:
+            try:
+                conc_re = r'[cC]\w* *= *[0-9|.]+ *.g\/.[lL]'
+                re_obj = re.compile(conc_re)
+                match = re_obj.search(description)
+                conc_raw = match.group()
+                conc_unit = conc_raw.partition('=')[2]
+                concentration = float(conc_unit[:-5].strip())
+                unit = conc_unit[-5:]
+                if 'ug' in unit or 'μg' in unit:
+                    concentration *= 1000
+            except Exception as e:
+                print(e)
         
-        if record_json["volume"]:
-            volume = float(record_json["volume"])
-            if record_json["volume_unit_id"] == lg_units['mL']:
+        if 'filtr' in description.lower():
+            filtration = 'Y'
+        else:
+            filtration = 'N'
+        
+        if volume:
+            volume = float(volume)
+            if record_json['volume_unit_id'] == lg_units['mL']:
                 volume *= 1000
-        
-        # Plasmids sheet
         
         # TODO - consumed stock (None)
         
+        # Plasmids sheet
         try:  
+            ws_plasmids.cell(
+                column=pl_header['Stock name (Plasmid)'], 
+                row=i
+                ).value = plasmid_name
+            ws_plasmids.cell(
+                column=pl_header['Filtered'],
+                row=i
+                ).value = filtration
+            ws_plasmids.cell(
+                column=pl_header['Conc'],
+                row=i
+                ).value = concentration
             ws_plasmids.cell(
                 column=pl_header['Volume'],
                 row=i
@@ -463,6 +488,7 @@ def get_plasmid_data():
                 column=pl_header['Link - Inv'],
                 row=i
                 ).hyperlink = lg_url + record_json["stockable"]["url"]
+            
         except Exception as e:
             print(e)
         
@@ -1131,9 +1157,3 @@ def create_box():
 
 if __name__ == '__main__':
     run_menu()
-    # token = get_token()
-    # boxes = scan_storage(token, 1796)
-    # mypath = 'C:\\Users\\m.nowak\\Desktop\\Python\\HTsyn'
-    # filename = 'boxes.json'
-    # with open(join(mypath, filename), 'w') as file:
-    #     json.dump(boxes, file, indent=4)
