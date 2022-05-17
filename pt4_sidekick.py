@@ -26,8 +26,8 @@ def run_menu():
     global debug_mode 
     
     debug_mode = False
-    # token = get_token()
-    token = '3adfe55932a1244482a1066d1826006963612b37'
+    token = get_token()
+    
     print(token)
     # token = None
     pb_all = 'P:\\_research group folders\\PT Proteins\\PT4\\_PT4_sidekick'
@@ -207,7 +207,35 @@ def save_workbook(wb, mypath, file):
             print(f'---< Unable to save changes in {file} >---'.center(80))
             print('Close the file and continue'.center(80))
             system('pause')
-            
+
+
+def write_data(sheet, header_dict, data, i):
+    '''
+    Writes data to cell in the sheet:
+        sheet:          workbook.sheet
+        header_dict:    column_name: column_index
+        data:           value, column_name
+        i:              row index
+    '''
+    for value, column_name in data:
+        try:
+            sheet.cell(i, header_dict[column_name]).value = value
+        except Exception as e:
+            print(e)
+
+def write_hyperlinks(sheet, header_dict, urls, i):
+    '''
+    Writes data to cell in the sheet:
+        sheet:          workbook.sheet
+        header_dict:    column_name: column_index
+        data:           value, column_name
+        i:              row index
+    '''
+    for url, column_name in urls:
+        try:
+            sheet.cell(i, header_dict[column_name]).hyperlink = url
+        except Exception as e:
+            print(e)
 
 # API requests
 
@@ -405,12 +433,19 @@ def get_plasmid_data():
 
         plasmid_name = record_json["name"]
         plasmid_id = record_json["stockable"]["id"]
-        plasmid_name = record_json["stockable"]["name"]
         plasmid_sysid = get_sysid_pl(plasmid_id)
-        prot_name = plasmid_name.split('_')[1]
+        plasmid_inv_name = record_json["stockable"]["name"]
         concentration = float(record_json["concentration"])
         volume = record_json['volume']
         description = record_json["description"]
+        box = record_json["storage"]["name"]
+        position = record_json["box"]["location_in_box"]
+        stock_url = lg_url + record_json["url"]
+        inv_url = lg_url + record_json["stockable"]["url"]
+        link = 'LINK'
+        
+        prot_name = plasmid_inv_name.split('_')[1]
+        prot_i = 2+(i-2)*5
         
         if description:
             try:
@@ -436,75 +471,36 @@ def get_plasmid_data():
             if record_json['volume_unit_id'] == lg_units['mL']:
                 volume *= 1000
         
+        plasmid_data = [
+            (plasmid_name, 'Stock name (Plasmid)'),
+            (filtration, 'Filtered'),
+            (concentration, 'Conc'),
+            (volume, 'Volume'),
+            (box, 'Box'),
+            (position, 'Position'),
+            (link, 'Link - Stock'),
+            (plasmid_sysid, 'SysID'),
+            (plasmid_inv_name, 'Plasmid inventory name'),
+            (link, 'Link - Inv')
+        ]
+        
+        plasmid_hyperlinks = [
+            (stock_url, 'Link - Stock'),
+            (inv_url, 'Link - Inv')  
+        ]
+        
+        prot_data = [
+            (prot_name, 'POI name'),
+            (plasmid_sysid, 'Plasmid SysID'),
+            (plasmid_name, 'Plasmid inventory name')
+        ]
+        
         # TODO - consumed stock (None)
         
         # Plasmids sheet
-        try:  
-            ws_plasmids.cell(
-                column=pl_header['Stock name (Plasmid)'], 
-                row=i
-                ).value = plasmid_name
-            ws_plasmids.cell(
-                column=pl_header['Filtered'],
-                row=i
-                ).value = filtration
-            ws_plasmids.cell(
-                column=pl_header['Conc'],
-                row=i
-                ).value = concentration
-            ws_plasmids.cell(
-                column=pl_header['Volume'],
-                row=i
-                ).value = volume
-            ws_plasmids.cell(
-                column=pl_header['Box'],
-                row=i
-                ).value = record_json["storage"]["name"]
-            ws_plasmids.cell(
-                column=pl_header['Position'],
-                row=i
-                ).value = record_json["box"]["location_in_box"]
-            ws_plasmids.cell(
-                column=pl_header['Link - Stock'],
-                row=i
-                ).value = 'LINK'
-            ws_plasmids.cell(
-                column=pl_header['Link - Stock'],
-                row=i
-                ).hyperlink = lg_url + record_json["url"]
-            ws_plasmids.cell(
-                column=pl_header['SysID'],
-                row=i
-                ).value = plasmid_sysid
-            ws_plasmids.cell(
-                column=pl_header['Plasmid inventory name'],
-                row=i
-                ).value = plasmid_name
-            ws_plasmids.cell(
-                column=pl_header['Link - Inv'],
-                row=i
-                ).value = 'LINK'
-            ws_plasmids.cell(
-                column=pl_header['Link - Inv'],
-                row=i
-                ).hyperlink = lg_url + record_json["stockable"]["url"]
-            
-        except Exception as e:
-            print(e)
-        
-        # Protein sheet
-        ws_proteins.cell(
-            column=pt_header['POI name'],
-            row=2+(i-2)*5
-            ).value = prot_name
-        ws_proteins.cell(
-            column=pt_header['Plasmid SysID'],
-            row=2+(i-2)*5
-            ).value = plasmid_sysid
-        ws_proteins.cell(
-            column=pt_header['Plasmid inventory name'],
-            row=2+(i-2)*5
-            ).value = plasmid_name
+        write_data(ws_plasmids, pl_header, plasmid_data, i)
+        write_hyperlinks(ws_plasmids, pl_header, plasmid_hyperlinks, i)
+        write_data(ws_proteins, pt_header, prot_data, prot_i)
 
         if record.status_code == 200:
             print(f"..DONE")
@@ -593,6 +589,8 @@ def protein_analysis():
                         full_ab.prot_mass()
                         full_ab.abs_coeff()
                         full_ab.pI()
+                        
+                        # TODO Refactor write data
                         
                         prot_name = ws_proteins.cell(
                             column=pt_header['POI name'],
@@ -881,6 +879,7 @@ def add_pt_stocks():
     
     task_start(file)
     
+    # Refactor - write_data
     for i in range(2, 502, 5):
         added = False
         
@@ -1146,10 +1145,7 @@ def create_label_xlsx():
     task_end()
 
 
-
-def options():
-    pass
-
+# TODO Create new box if no box found
 def create_box():
     pass
 
