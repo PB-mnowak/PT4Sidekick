@@ -1,17 +1,20 @@
-# Get protein data if ID given
+# TODO Get protein data if ID given
 # Log: adding stocks - protein / stock / location
 # Tag detection
 
+# TODO Sort helper functions
+
 from os import listdir, getcwd, system
 from os.path import isfile, join
-from Bio import GenBank
+from Bio import GenBank, BiopythonWarning
 from Bio.Seq import Seq
 from getpass import getpass
-from Data.pt4_protein import Protein
-from Data.pt4_data import protein_db, lg_units
+from src.pt4_protein import Protein
+from src.pt4_data import *
 from openpyxl import load_workbook, Workbook
 
 # import json
+import pandas as pd
 import re
 # import time
 import requests
@@ -19,14 +22,15 @@ import warnings
 
 # Main menu
 
-def run_menu():
+def main():
     system('cls')
     global token
     global pb_all
-    global debug_mode 
+    global test_mode 
     
-    debug_mode = False
+    test_mode = False
     token = get_token()
+    # token = '3adfe55932a1244482a1066d1826006963612b37'
     
     print(token)
     # token = None
@@ -52,11 +56,7 @@ def run_menu():
             }
 
         # Print menu
-        print('/ PT4 Sidekick \\'.center(80, '_'), '\n')
-        for k, v in menu_dict.items():
-            print(f'{k:>2}) {v[0]}')
-        print('\n Q - Quit')
-        print(''.center(80, '_'))
+        print_menu(menu_dict)
 
         user_input = input('\nTask number: ')
         
@@ -83,6 +83,13 @@ def run_menu():
 
 # Helpers
 
+def print_menu(menu_dict):
+        print('/ PT4 Sidekick \\'.center(80, '_'), '\n')
+        for k, v in menu_dict.items():
+            print(f'{k:>2}) {v[0]}')
+        print('\n Q - Quit')
+        print(''.center(80, '_'))
+
 def task_start(file = None):
     print("/ Task in progress \\".center(80, '_'), '\n', sep='')
     if file is not None:
@@ -102,11 +109,45 @@ def pball_connection(file):
 def verify_file_sheets(path: str, file: str):
     """ Verify if main sheets are present in the file """
     
-    template_sheets = {'Plasmids', 'Proteins'}
     wb = load_workbook(join(path, file))
-    wb_sheets = set(wb.sheetnames)
-    wb.close()
-    return wb_sheets.issuperset(template_sheets)
+    
+    try:
+        wb_sheets = set(wb.sheetnames)
+        pl_columns_set = set([cell.value for cell in wb['Plasmids'][1]])
+        pt_columns_set = set([cell.value for cell in wb['Proteins'][1]])
+        
+        wb.close()
+       
+        all_sheets = wb_sheets.issuperset(sheet_verification['sheets'])
+        pl_all_cols, pt_all_cols = False, False
+        
+        if all_sheets:
+            pl_columns_set = set([cell.value for cell in wb['Plasmids'][1]])
+            pt_columns_set = set([cell.value for cell in wb['Proteins'][1]])
+            
+            pl_all_cols = pl_columns_set.issuperset(sheet_verification['Plasmids'])
+            pt_all_cols = pt_columns_set.issuperset(sheet_verification['Proteins'])
+        
+        conditions =  [all_sheets, pl_all_cols, pt_all_cols]
+        
+        if all(conditions):
+            return True
+        else:
+            issues = [
+                'Missing workbook sheets.',
+                'Missing columns in "Plasmids" sheet.',
+                'Missing columns in "Proteins" sheet.'
+                ]
+            
+            detected_issues = [issue for issue, cond in zip(issues, conditions) if not cond]
+            print(f'---< {" ".join(detected_issues)} Select other file >---'.center(80))
+            return False
+         
+    except Exception as e:
+        print(e)
+        wb.close()
+        return False
+    
 
 def print_task(func):
     def wrap(*args, **kwargs):
@@ -116,44 +157,44 @@ def print_task(func):
         return result
     return wrap
 
-def update_flag():
+def if_overwrite():
     while True:
-        flag = input("Update existing records? (Y/N) ").upper()
-        if flag == "Y":
+        overwrite = input("Overwrite existing records? (Y/N) ").upper()
+        if overwrite == "Y":
             print()
             return True
-        elif flag == "N":
+        elif overwrite == "N":
             return False
         else:
             print("---< Wrong input. Try again >---".center(80))
 
-def get_path_file():
+def get_path_file(ext):
     mypath = getcwd()
-    xlsx_list = scan_xlsx(mypath)
-    file = choose_file(mypath, xlsx_list)
+    xlsx_list = scan_files(mypath, ext)
+    file = choose_file(mypath, xlsx_list, ext)
     if file is None:
         return mypath, None
     print()
     return mypath, file
 
-def scan_xlsx(path):
+def scan_files(path, ext):
     """ Returns list of xlsx files in given path """
-    xlsx_list = [file for file in listdir(path) if check_filename(path, file)]
+    xlsx_list = [file for file in listdir(path) if check_filename(path, file, ext)]
     return xlsx_list
 
-def check_filename(path, file: str):
+def check_filename(path, file, ext):
     """  """
     is_file = isfile(join(path, file))
-    is_xlsx = file.endswith('.xlsx')
+    is_xlsx = file.endswith(f'.{ext}')
     not_temp = not file.startswith('~$')
     conditions = [is_file, is_xlsx, not_temp]
     return all(conditions)
 
-def choose_file(path, xlsx_list):
+def choose_file(path, file_list, ext):
     print('/ Select file \\'.center(80, '_'), '\n', sep='')
-    xlsx_dict = {str(i): file for i, file in enumerate(xlsx_list, 1)}    
+    xlsx_dict = {str(i): file for i, file in enumerate(file_list, 1)}    
     for i, file in xlsx_dict.items():
-        print(f'{i.rjust(2)})', file.replace('.xlsx', ''), sep=" ")
+        print(f'{i.rjust(2)})', file.replace(f'.{ext}', ''), sep=" ")
     print('\n', 'Q - Return to menu')
     print(''.center(80, '_'), '\n', sep='')
     
@@ -164,7 +205,8 @@ def choose_file(path, xlsx_list):
                 break
         elif file_i == 'q':
             return None
-        print('---< Wrong input or workbook format. Select other file >---'.center(80))
+        else:
+            print('---< Wrong input. Try again >---'.center(80))
 
     system('cls')
 
@@ -176,11 +218,32 @@ def scan_genebank(path):
 
 def pos_to_int(pos_str):
     """ Changes position naming between index and LetterNumber formats """
+    
+    def is_alnum(pos_str):
+        try:
+            pos_split = list(pos_str)
+            cond_1 = pos_split == 2
+            cond_2 = pos_split[0].isalpha()
+            cond_3 = pos_split[0].isnumeric()
+            conditions = [cond_1, cond_2, cond_3]
+            return all(conditions)
+        except:
+            return False
+    
+    # TODO pos <= 81
+    
     try:
-        pos_int = int(pos_str.split(' ')[0])
+        if is_alnum(pos_str):
+            pos_split = list(pos_str)
+            row = ord(pos_split[0].upper()) - 65
+            col = int(pos_split[1])
+            return row * 9 + col
+        else:
+            pos_int = int(pos_str.split(' ')[0])
         return pos_int
     except:
-        print(f'---< Wrong type of stock position format: {type(pos_str)} >---'.center(80))
+        print(f'---< Wrong type of stock position format: {pos_str} >---'.center(80))
+        print("Accepted formats: '1 (A1)', '1' or 'A1'")
 
 def pos_to_str(pos_int):
     try:
@@ -237,21 +300,52 @@ def write_hyperlinks(sheet, header_dict, urls, i):
         except Exception as e:
             print(e)
 
+def choose_box_name(box_name):
+    print(f'\nSuggested new name: {box_name}')
+    while True:
+        box_name_approve = input('Y - accept | N - change').upper()
+        if box_name_approve == 'Y':
+            break
+        elif  box_name_approve == 'N':
+            box_name = input('Enter box name: ')
+        else:
+            print('---< Wrong input. Try again >---'.center(80))
+    return box_name
+
+def conc_conversion(concentration, unit):
+    try:
+        mass_unit, vol_unit = unit.strip().split('/')
+        mass = conc_units.get(mass_unit, 1)
+        vol = conc_units.get(vol_unit, 1)
+        if concentration is not None:
+            concentration = float(concentration) * int(mass / vol)
+    except:
+        pass
+    return concentration
+
+def volume_conversion(volume, lg_unit, base_unit='μl'):
+    try:
+        unit_value = lg_units_conversion[lg_unit]
+        base_unit_value = conc_units[base_unit]
+        if volume is not None:
+            volume = float(volume) * int(unit_value / base_unit_value)
+    except KeyError:
+        pass
+    return volume
+
 # API requests
 
 def get_token(token = None):
     if token is None:
-        print("\nEnter LabGuru credentials: name (n.surname) and password")
+        print("\nEnter Labguru credentials: name (n.surname) and password")
         while True:
-            
-            # name = str(input("Name: ")).lower() + "@purebiologics.com"
-            # password = str(getpass("Password: "))
-            if debug_mode is True:
+
+            if test_mode is True:
                 name = 'LG_User1@purebiologics.com'
                 password = 'LG_user1'
             else:
-                name = 'm.nowak@purebiologics.com'
-                password = 'xENosPB2022@'
+                name = str(input("Name: ")).lower() + "@purebiologics.com"
+                password = str(getpass("Password: "))
             
             body = {"login": name, "password": password}
             
@@ -319,6 +413,41 @@ def get_box_data(token: str, box_id: str): # token
     
     return box_data
 
+# TODO Create new box if no box found
+def add_box(box_types=box_types, storage=None):
+    
+    if storage is None:
+        boxes_str, boxes_id = scan_storage(token, '1796')
+        storage = boxes_str
+       
+    box_num = max([int(box[-2:]) for box in storage.keys()]) + 1
+    box_name = f'Z23.C.{box_num:02d}'
+    box_rows, box_cols = 9, 9
+    
+    box_name = choose_box_name(box_name)
+    
+    url = 'https://my.labguru.com/api/v1/boxes'
+    body = {'token': token,
+            'item': {
+                "name": box_name,
+                "rows": box_rows,
+                "cols": box_cols,
+                "box_type": box_types['Plasmid'],
+                "color": 'yellow',
+                "shared": "1"
+                }
+            }
+
+    session = requests.post(url, json=body)
+    
+    if session.status_code == 201:
+        new_box = session.json()
+        # TODO - open box page to change the box location to 4.38
+        system(f'explorer "https://my.labguru.com/storage/boxes/{new_box["id"]}/edit"')
+        return new_box
+    else:
+            print(f'Error while handling {box_name} - Code {session.status_code}')
+
 def add_protein(prot_data):
     """ """
     url = 'https://my.labguru.com/api/v1/proteins'
@@ -372,14 +501,14 @@ def generate_template():
 
 def get_plasmid_data():
 
-    def collect_ids(flag=False):
+    def collect_ids(overwrite=False):
         stock_ids = []
         for i in range(2,102):
             stock_id = ws_plasmids.cell(
                 column=pl_header['ID'],
                 row=i
                 ).value
-            if not flag:
+            if not overwrite:
                 plasmid_name = ws_plasmids.cell(
                 column=pl_header['Plasmid inventory name'],
                 row=i
@@ -390,18 +519,18 @@ def get_plasmid_data():
                 stock_ids.append((i, str(stock_id), ))
         return stock_ids
 
-    mypath, file = get_path_file()
+    mypath, file = get_path_file('xlsx')
     if file is None:
         return None
 
     task_start(file)
     
-    flag = update_flag()
+    overwrite = if_overwrite()
     
     lg_url = 'https://my.labguru.com/'
     filler = '.'
 
-    wb = load_workbook(join(mypath, file), read_only=False)
+    wb = load_workbook(join(mypath, file))
 
     ws_plasmids = wb["Plasmids"]
     ws_proteins = wb["Proteins"]
@@ -416,7 +545,7 @@ def get_plasmid_data():
     #     for col, i in pt_header.items():
     #         file.write(f'{col.ljust(30)}{i}\n')
 
-    stock_ids = collect_ids(flag)
+    stock_ids = collect_ids(overwrite)
 
     print("Downloading stock data:\n")
 
@@ -425,51 +554,62 @@ def get_plasmid_data():
         stock_url = f'https://my.labguru.com/api/v1/stocks/{stock}.json?token={token}'
         record = requests.get(stock_url)
         record_json = record.json()
-
-        if record_json["content_type_for_display"] != 'Plasmid':
+        
+        # TODO >>> Function
+        try:
+            if record_json["content_type_for_display"] != 'Plasmid':
+                print(f"FAILED")
+                print(f'---< Stock {stock} is not a plasmid >---'.center(80))
+                continue
+        except KeyError:
             print(f"FAILED")
-            print(f'---< Stock {stock} is not a plasmid >---'.center(80))
-            break
+            continue
 
         plasmid_name = record_json["name"]
         plasmid_id = record_json["stockable"]["id"]
         plasmid_sysid = get_sysid_pl(plasmid_id)
         plasmid_inv_name = record_json["stockable"]["name"]
         concentration = float(record_json["concentration"])
+        volume_unit = record_json['volume_unit_id']
         volume = record_json['volume']
+        volume = volume_conversion(volume, volume_unit, 'μl')
         description = record_json["description"]
-        box = record_json["storage"]["name"]
-        position = record_json["box"]["location_in_box"]
+        try:
+            box = record_json["storage"]["name"]
+            position = record_json["box"]["location_in_box"]
+        except TypeError:
+            box = 'Consumed'
+            position = ''
         stock_url = lg_url + record_json["url"]
         inv_url = lg_url + record_json["stockable"]["url"]
         link = 'LINK'
         
-        prot_name = plasmid_inv_name.split('_')[1]
+        if not box.startswith('Z23.C'):
+            transfer = 'Y'
+        else:
+            transfer = ''
+        
+        prot_name = plasmid_inv_name.partition('.')[2]
         prot_i = 2+(i-2)*5
         
         if description:
             try:
-                conc_re = r'[cC]\w* *= *[0-9|.]+ *.g\/.[lL]'
+                conc_re = r'[cC]\w*.? *= *[0-9|.]+ *.g\/.[lL]'
                 re_obj = re.compile(conc_re)
                 match = re_obj.search(description)
-                conc_raw = match.group()
-                conc_unit = conc_raw.partition('=')[2]
-                concentration = float(conc_unit[:-5].strip())
-                unit = conc_unit[-5:]
-                if 'ug' in unit or 'μg' in unit:
-                    concentration *= 1000
+                if match is not None:
+                    conc_raw = match.group()
+                    conc_unit = conc_raw.partition('=')[2]
+                    concentration = float(conc_unit[:-5].strip())
+                    unit = conc_unit[-5:].lower().replace('u', 'μ')
+                    concentration = conc_conversion(concentration, unit)
             except Exception as e:
                 print(e)
         
-        if 'filtr' in description.lower():
+        if 'filt' in description.lower():
             filtration = 'Y'
         else:
             filtration = 'N'
-        
-        if volume:
-            volume = float(volume)
-            if record_json['volume_unit_id'] == lg_units['mL']:
-                volume *= 1000
         
         plasmid_data = [
             (plasmid_name, 'Stock name (Plasmid)'),
@@ -481,26 +621,27 @@ def get_plasmid_data():
             (link, 'Link - Stock'),
             (plasmid_sysid, 'SysID'),
             (plasmid_inv_name, 'Plasmid inventory name'),
-            (link, 'Link - Inv')
+            (link, 'Link - Inv'),
+            (transfer, 'Transfer'),
         ]
         
         plasmid_hyperlinks = [
             (stock_url, 'Link - Stock'),
-            (inv_url, 'Link - Inv')  
+            (inv_url, 'Link - Inv'), 
         ]
         
         prot_data = [
             (prot_name, 'POI name'),
             (plasmid_sysid, 'Plasmid SysID'),
-            (plasmid_name, 'Plasmid inventory name')
+            (plasmid_inv_name, 'Plasmid inventory name'),
         ]
         
         # TODO - consumed stock (None)
         
         # Plasmids sheet
         write_data(ws_plasmids, pl_header, plasmid_data, i)
-        write_hyperlinks(ws_plasmids, pl_header, plasmid_hyperlinks, i)
         write_data(ws_proteins, pt_header, prot_data, prot_i)
+        write_hyperlinks(ws_plasmids, pl_header, plasmid_hyperlinks, i)
 
         if record.status_code == 200:
             print(f"..DONE")
@@ -517,7 +658,10 @@ def get_plasmid_data():
 
 def protein_analysis():
     """ """
-    mypath, file = get_path_file()
+    
+    warnings.filterwarnings('ignore', category=BiopythonWarning, module='Bio')
+    
+    mypath, file = get_path_file('xlsx')
     
     if file is None:
         return None
@@ -559,13 +703,13 @@ def protein_analysis():
         with open(join(mypath, gb_file)) as handle:          
             for record in GenBank.parse(handle):
                 for i in range(2, 502, 5):
-                    if (plasmid_name := ws_proteins.cell(
+                    if (plasmid_inv_name := ws_proteins.cell(
                             column=pt_header['Plasmid inventory name'],
                             row=i
                             ).value) is None:
                         continue
 
-                    elif plasmid_name in record.locus:
+                    elif plasmid_inv_name in record.locus:
                         
                         found_seqs += 1
                         raw_seq = Seq(record.sequence)
@@ -598,7 +742,7 @@ def protein_analysis():
                             ).value
                         
                         if prot_name is None:
-                            prot_name = plasmid_name.split('_')[1]
+                            prot_name = plasmid_inv_name.partition('.')[2]
                             ws_proteins.cell(
                                 column=pt_header['POI name'],
                                 row=i
@@ -643,7 +787,7 @@ def protein_analysis():
 
 def create_import_file():
     """  """
-    mypath, file = get_path_file()
+    mypath, file = get_path_file('xlsx')
     if file is None:
         return None
     
@@ -679,7 +823,7 @@ def create_import_file():
     print(f'Import file saved as {filename}')
     
     while True:
-        if_import = input('Open LabGuru import page? (Y/N) ').upper()
+        if_import = input('Open Labguru import page? (Y/N) ').upper()
         if if_import == "Y":
             open_import_lg()
             break
@@ -694,21 +838,21 @@ def open_import_lg():
     """
     Opens LG page for xlsx import/update.
     """
-    print('\nMake sure you are logged to LabGuru via webbrowser')
+    print('\nMake sure you are logged to Labguru via webbrowser')
     system('pause')
-    system('explorer "https://my.labguru.com/system/json_imports/class=System%3A%3AStorage%3A%3AStock"')
-    print('\nTransfer import file to LabGuru import page')
+    system('explorer "https://my.labguru.com/system/json_imports/new?class=System%3A%3AStorage%3A%3AStock"')
+    print('\nTransfer import file to Labguru import page')
 
 def load_pl_transfer(token, mypath, file):
     """ Creates dict with stock: data necessary for transfer """
 
     def find_pos(boxes_data, box_name):
+
         if boxes_data[box_name]['free_pos']:
             position = boxes_data[box_name]['free_pos'].pop(0)
-            return position
         else:
             position = None
-            return position
+        return position
     
     # Checks if box data is loaded into boxes_data and loads it if not
     def update_box_data(boxes_data, box_name, box_id):
@@ -721,6 +865,10 @@ def load_pl_transfer(token, mypath, file):
     def add_stock_position(boxes_data, boxes_str, boxes_id, position, box_name):
         
         box_name, box_id = switch_to_id(boxes_id, boxes_str, box_name)
+
+        # TODO - new_box = add_box() if no box found
+        # box_name = new_box['name']
+        # box_id = new_box['id']
         
         # Convert box position to int
         if isinstance(position, str):
@@ -741,20 +889,40 @@ def load_pl_transfer(token, mypath, file):
                 return box_name, position
 
         # Find box with free position         
-        else:
-            for box in boxes_str.keys():
-                box_id = boxes_str[box]
-                update_box_data(boxes_data, box, box_id)
-                position = find_pos(boxes_data, box)
-                if position is not None:
-                    return box, position
+        for box in boxes_str.keys():
+            box_id = boxes_str[box]
+            update_box_data(boxes_data, box, box_id)
+            position = find_pos(boxes_data, box)
+
+            if position is not None:
+                return box, position
+
+        while True:
+            new_box_choice = input('No free box found for at least one stock. Add a new box? (Y/N)').upper()
+            if new_box_choice == 'Y':
+                new_box = add_box()
+                new_box_name = new_box['name']
+                new_box_id = new_box['id']
+                
+                boxes_data[new_box_name] = new_box_id
+                update_box_data(boxes_data, new_box_name, new_box_id)
+                position = find_pos(boxes_data, new_box)
+                
+                return new_box_name, position
+            
+            elif new_box_choice == 'N':
+                break
+            else:
+                print('---< Wrong input. Try again >---'.center(80))
+        
+        return None, None
     
     def transfer_validation(row):
         '''
         Validate row for sample transfer
         '''
         transfer = row[pl_header['Transfer'] - 1]
-        
+
         cond_id = row[pl_header['ID'] - 1] is not None
         cond_transfer_str = isinstance(transfer, str)
         cond_transfer_y = False
@@ -766,6 +934,7 @@ def load_pl_transfer(token, mypath, file):
             cond_transfer_str,
             cond_transfer_y,
             ]
+
         return all(conditions)
     
     def switch_to_id(boxes_id, boxes_str, box_name):
@@ -774,15 +943,15 @@ def load_pl_transfer(token, mypath, file):
         '''
         if isinstance(box_name, int):
             try:
-                box_name, box_id = boxes_id[box_id], box_name
+                box_name, box_id = boxes_id[box_name], box_name
             except KeyError:
-                print(f'{box_id} not matching any box ID in Z23.C storage')
+                print(f'---< {box_name} not matching any box ID in Z23.C storage >---'.center(80))
                 box_name, box_id = None, None
         elif isinstance(box_name, str):
             try:
                 box_id = boxes_str[box_name]
             except KeyError:
-                print(f'{box_name} not found in Z23.C storage')
+                print(f'---< {box_name} not found in Z23.C storage >---'.center(80))
                 box_name, box_id = None, None
         else:
             box_name, box_id = None, None
@@ -829,7 +998,7 @@ def load_pl_transfer(token, mypath, file):
                 )
             
             if box_name is None or position is None:
-                print(f'No position found for stock {stock_name}')
+                print(f'---< No position found for stock {stock_name} >---'.center())
                 continue
             
             else:
@@ -865,7 +1034,7 @@ def load_pl_transfer(token, mypath, file):
 def add_pt_stocks():
     """ """
     
-    mypath, file = get_path_file()
+    mypath, file = get_path_file('xlsx')
     if file is None:
         return None
     
@@ -879,20 +1048,20 @@ def add_pt_stocks():
     
     task_start(file)
     
-    # Refactor - write_data
+    # TODO Refactor - write_data
     for i in range(2, 502, 5):
         added = False
         
-        plasmid_id = ws_proteins.cell(
+        plasmid_sysid = ws_proteins.cell(
             row=i,
             column=pt_header['Plasmid SysID']
             ).value
-        plasmid_name = ws_proteins.cell(
+        plasmid_inv_name = ws_proteins.cell(
             row=i,
             column=pt_header['Plasmid inventory name']
             ).value
         
-        if plasmid_id and plasmid_name:
+        if plasmid_sysid and plasmid_inv_name:
             prot_sysid = ws_proteins.cell(
                 row=i,
                 column=pt_header['POI SysID']
@@ -912,7 +1081,7 @@ def add_pt_stocks():
             
             # Create protein name from plasmid name if none given
             if not prot_name:
-                prot_name =  plasmid_name.split('_')[1]
+                prot_name =  plasmid_inv_name.partition('.')[2]
                 ws_proteins.cell(
                     row=i,
                     column=pt_header['POI name']
@@ -939,7 +1108,7 @@ def add_pt_stocks():
                     ).value
                 abs_red = ws_proteins.cell(
                     row=i,
-                    column=pt_header['A0.1% (Ox)']
+                    column=pt_header['A0.1% (Red)']
                     ).value
                 # TODO what if only one abs given
                 if abs_ox and abs_red:
@@ -1026,10 +1195,12 @@ def add_pt_stocks():
                 if vol is None or stock_id:
                     continue
                 
+                # TODO get storage_type based on storage_id (Box or Rack Cell)
+                                
                 stock_data= {
                     "name": prot_name,
                     "storage_id": box_id,
-                    "storage_type": "System::Storage::Box",
+                    "storage_type": "Rack Cell",
                     "stockable_type": "Biocollections::Protein",
                     "stockable_id": prot_id,
                     "description": description,
@@ -1071,7 +1242,7 @@ def add_pt_stocks():
                 ws_proteins.cell(row=i+3, column=j).value = box # box name
                 ws_proteins.cell(row=i+4, column=j).value = pos # box position
                 
-                print(f'\tStock {j-21} (ID: {stock_id:>6}) - Box: {box}, Position: {pos}')
+                print(f'\tStock {j-23} (ID: {stock_id:>6}) - Box: {box}, Position: {pos}')
 
     save_workbook(wb, mypath, file)
     wb.close()
@@ -1088,8 +1259,9 @@ def add_pt_stocks():
 def create_label_xlsx():
     
     mypath = getcwd()
-    xlsx_list = scan_xlsx(mypath)
-    file = choose_file(mypath, xlsx_list)
+    ext = 'xlsx'
+    xlsx_list = scan_files(mypath, ext)
+    file = choose_file(mypath, xlsx_list, ext)
     if file is None:
         return None
     
@@ -1107,8 +1279,7 @@ def create_label_xlsx():
     for i in range(2, 502, 5):
         for j in range(
                 pt_header['Stock 1'],
-                pt_header['Stock 5']+1
-                ):
+                pt_header['Stock 5']+1):
             
             stock_name = ws_proteins.cell(
                 row=i,
@@ -1130,9 +1301,9 @@ def create_label_xlsx():
             
             ws_label.cell(column=1, row=label_i).value = stock_name
             ws_label.cell(column=2, row=label_i).value = stock_id
-            ws_label.cell(column=3, row=label_i).value = stock_tag
-            ws_label.cell(column=4, row=label_i).value = stock_conc
-            ws_label.cell(column=5, row=label_i).value = stock_vol
+            ws_label.cell(column=3, row=label_i).value = round(stock_conc, 3)
+            ws_label.cell(column=4, row=label_i).value = round(stock_vol, 0)
+            ws_label.cell(column=5, row=label_i).value = stock_tag
             
             label_i += 1
     wb.close()
@@ -1145,11 +1316,16 @@ def create_label_xlsx():
     task_end()
 
 
-# TODO Create new box if no box found
-def create_box():
-    pass
+def load_viability():
+    
+    mypath, file = get_path_file('xlsx')
+    mypath, file_csv = get_path_file('csv')
+    
+    print(file, file_csv)
+
 
 
 
 if __name__ == '__main__':
-    run_menu()
+    main()
+    # load_viability()
