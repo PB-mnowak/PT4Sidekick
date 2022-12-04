@@ -66,7 +66,7 @@ class Protein():
 
     # Generate list of aa (list) and calculate it's length (int)
     def add_sequence(self, seq=None):
-        if not seq:
+        if seq is None:
             seq = input("Enter protein sequence: ").strip().upper()
         self.seq = "".join([aa for aa in seq if aa in self.aa_dict])
         self.seq_len = len(self.seq)
@@ -220,17 +220,3 @@ def load_file(address):
         for line in f.readline():
             if ">" in line:
                 up_id = line.split()
-
-# if __name__ == "__main__":
-#     # up_id = "P41221"
-#     # seq = "MKKSIGILSPGVALGMAGSAMSSKFFLVALAIFFSFAQVVIEANSWWSLGMNNPVQMSEVYIIGAQPLCSQLAGLSQGQKKLCHLYQDHMQYIGEGAKTGIKECQYQFRHRRWNCSTVDNTSVFGRVMQIGSRETAFTYAVSAAGVVNAMSRACREGELSTCGCSRAARPKDLPRDWLWGGCGDNIDYGYRFAKEFVDARERERIHAKGSYESARILMNLHNNEAGRRTVYNLADVACKCHGVSGSCSLKTCWLQLADFRKVGDALKEKYDSAAAMRLNSRGKLVQVNSRFNSPTTQDLVYIDPSPDYCVRNESTGSLGTQGRLCNKTSEGMDGCELMCCGRGYDQFKTVQTERCHCKFHWCCYVKCKKCTEIVDQFVCK"
-    
-#     poi = Protein()
-#     # poi.uniprot_data(up_id=up_id)
-#     # poi.add_sequence(seq=seq)
-#     poi.add_sequence()
-#     poi.aa_distr()
-#     poi.prot_mass()
-#     poi.abs_coeff()
-#     poi.pI()
-#     poi.show_analysis()

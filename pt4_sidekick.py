@@ -4,6 +4,7 @@
 
 # TODO Sort helper functions
 
+from string import ascii_lowercase, ascii_uppercase
 from os import listdir, getcwd, system
 from os.path import isfile, join
 from Bio import GenBank, BiopythonWarning
@@ -28,9 +29,9 @@ def main():
     global pb_all
     global test_mode 
     
-    test_mode = False
-    token = get_token()
-    # token = '3adfe55932a1244482a1066d1826006963612b37'
+    mode_selection = input('Test mode (Y/N): ').lower()
+    test_mode = mode_selection == 'y'
+    token = get_token(test_mode=test_mode)
     
     print(token)
     # token = None
@@ -271,7 +272,6 @@ def save_workbook(wb, mypath, file):
             print('Close the file and continue'.center(80))
             system('pause')
 
-
 def write_data(sheet, header_dict, data, i):
     '''
     Writes data to cell in the sheet:
@@ -333,16 +333,30 @@ def volume_conversion(volume, lg_unit, base_unit='μl'):
         pass
     return volume
 
+def gen_prot_name(plasmid_inv_name: str) -> str:
+    """
+    Generates protein inventory from plasmid inventory name by
+    removing plasmid type
+    """
+    try:
+        pattern = f'[{ascii_lowercase}]+[{ascii_uppercase}]+[._]'
+        re_obj = re.compile(pattern)
+        return re_obj.sub('', plasmid_inv_name)
+    except Exception as e:
+        print(e)
+        return plasmid_inv_name
+
+
 # API requests
 
-def get_token(token = None):
+def get_token(token = None, test_mode=False):
     if token is None:
         print("\nEnter Labguru credentials: name (n.surname) and password")
         while True:
 
             if test_mode is True:
-                name = 'LG_User1@purebiologics.com'
-                password = 'LG_user1'
+                name = ''
+                password = ''
             else:
                 name = str(input("Name: ")).lower() + "@purebiologics.com"
                 password = str(getpass("Password: "))
@@ -376,16 +390,23 @@ def get_sysid_pl(pl_id: str):
     session = requests.get(url)
     return session.json()['sys_id']
 
-def scan_storage(token, storage_id):
-    """ Returns dict of boxes {name: id} from given storage ID """
+def scan_storage(token: str, storage_id: str) -> dict:
+    """ 
+    Returns two dicts of boxes ID and their names based on Labguru JSON record
+    of the given storage ID:
+    1) boxes_sti (string to ID):    {name: id}  
+    2) boxes_its (ID to string):    {id: name} 
+
+    Box Z23.C.01 (ID: 1004) is excluded - only for positive controls
+    """
     url = f'https://my.labguru.com/storage/storages/{storage_id}?token={token}'
     page = requests.get(url)
     
     storage = page.json()
-    boxes_str = {box['name']: box['id'] for box in storage['boxes'] if box['id'] != 1004}
-    boxes_id = {box['id']: box['name'] for box in storage['boxes'] if box['id'] != 1004}
+    boxes_sti = {box['name']: box['id'] for box in storage['boxes'] if box['id'] != 1004}
+    boxes_its = {box['id']: box['name'] for box in storage['boxes'] if box['id'] != 1004}
 
-    return boxes_str, boxes_id
+    return boxes_sti, boxes_its
 
 def get_box_data(token: str, box_id: str): # token
     '''
@@ -569,7 +590,9 @@ def get_plasmid_data():
         plasmid_id = record_json["stockable"]["id"]
         plasmid_sysid = get_sysid_pl(plasmid_id)
         plasmid_inv_name = record_json["stockable"]["name"]
-        concentration = float(record_json["concentration"])
+        concentration = record_json["concentration"]
+        if concentration:
+            concentration = float(concentration)
         volume_unit = record_json['volume_unit_id']
         volume = record_json['volume']
         volume = volume_conversion(volume, volume_unit, 'μl')
@@ -584,18 +607,19 @@ def get_plasmid_data():
         inv_url = lg_url + record_json["stockable"]["url"]
         link = 'LINK'
         
-        if not box.startswith('Z23.C'):
+        if not box.startswith('Z23.C.'):
             transfer = 'Y'
         else:
             transfer = ''
         
-        prot_name = plasmid_inv_name.partition('.')[2]
-        prot_i = 2+(i-2)*5
+        prot_name = gen_prot_name(plasmid_inv_name)
+
+        prot_i = 2 + (i-2) * 5
         
         if description:
             try:
-                conc_re = r'[cC]\w*.? *= *[0-9|.]+ *.g\/.[lL]'
-                re_obj = re.compile(conc_re)
+                conc_pattern = r'[cC]\w*.? *= *[0-9|.]+ *.g\/.[lL]'
+                re_obj = re.compile(conc_pattern)
                 match = re_obj.search(description)
                 if match is not None:
                     conc_raw = match.group()
@@ -669,6 +693,9 @@ def protein_analysis():
     ss_list = protein_db['ss']
     end_list = protein_db['end']
     
+    # TODO Scan db for matches
+    # TODO Select if 1x or 2x
+
     ss_1 = "ATGTACAGGATGCAACTCCTGTCTTGCATTGCACTAAGTCTTGCACTTGTCACGAATTCA"
     ss_2 = "ATGTACAGGATGCAACTCCTGTCTTGCATTGCACTAAGTCTTGCACTTGTCACGAATTCG"
     light_end = "ACAAAGAGCTTCAACAGGGGAGAGTGTTAG"
@@ -727,51 +754,53 @@ def protein_analysis():
                         heavy_seq = Seq(raw_seq[start_2:stop_2]).translate(to_stop=True, cds=False)
 
                         # Create Protein object and conduct analysis
-                        full_ab = Protein()
-                        full_ab.add_sequence(2 * light_seq + 2 * heavy_seq)
-                        full_ab.aa_distr()
-                        full_ab.prot_mass()
-                        full_ab.abs_coeff()
-                        full_ab.pI()
+                        #TODO what if no seq match???
+                        if light_seq and heavy_seq:
+                            full_ab = Protein()
+                            full_ab.add_sequence(2 * light_seq + 2 * heavy_seq)
+                            full_ab.aa_distr()
+                            full_ab.prot_mass()
+                            full_ab.abs_coeff()
+                            full_ab.pI()
                         
-                        # TODO Refactor write data
-                        
-                        prot_name = ws_proteins.cell(
-                            column=pt_header['POI name'],
-                            row=i
-                            ).value
-                        
-                        if prot_name is None:
-                            prot_name = plasmid_inv_name.partition('.')[2]
-                            ws_proteins.cell(
+                            # TODO Refactor write data
+                            
+                            prot_name = ws_proteins.cell(
                                 column=pt_header['POI name'],
                                 row=i
-                                ).value = prot_name
+                                ).value
+                            
+                            if prot_name is None:
+                                prot_name = plasmid_inv_name.partition('.')[2]
+                                ws_proteins.cell(
+                                    column=pt_header['POI name'],
+                                    row=i
+                                    ).value = prot_name
 
-                        # Add sequence length
-                        ws_proteins.cell(
-                            column=pt_header['Length'],
-                            row=i
-                            ).value = full_ab.seq_len
-                        # Add mass of POI
-                        ws_proteins.cell(
-                            column=pt_header['MW'],
-                            row=i
-                            ).value = round(full_ab.mass, 2)
-                        # Add pI of POI
-                        ws_proteins.cell(
-                            column=pt_header['pI'],
-                            row=i
-                            ).value = round(full_ab.pI, 2)
-                        # Add absorbance coefficients
-                        ws_proteins.cell(
-                            column=pt_header['A0.1% (Ox)'],
-                            row=i
-                            ).value = round(full_ab.a_ox, 3)
-                        ws_proteins.cell(
-                            column=pt_header['A0.1% (Red)'],
-                            row=i
-                            ).value = round(full_ab.a_red, 3)
+                            # Add sequence length
+                            ws_proteins.cell(
+                                column=pt_header['Length'],
+                                row=i
+                                ).value = full_ab.seq_len
+                            # Add mass of POI
+                            ws_proteins.cell(
+                                column=pt_header['MW'],
+                                row=i
+                                ).value = round(full_ab.mass, 2)
+                            # Add pI of POI
+                            ws_proteins.cell(
+                                column=pt_header['pI'],
+                                row=i
+                                ).value = round(full_ab.pI, 2)
+                            # Add absorbance coefficients
+                            ws_proteins.cell(
+                                column=pt_header['A0.1% (Ox)'],
+                                row=i
+                                ).value = round(full_ab.a_ox, 3)
+                            ws_proteins.cell(
+                                column=pt_header['A0.1% (Red)'],
+                                row=i
+                                ).value = round(full_ab.a_red, 3)
     
     print("DONE\n")
               
@@ -964,7 +993,7 @@ def load_pl_transfer(token, mypath, file):
     pl_header = sheet_header(ws_plasmids[1])
     
     # Dicts changing box name>id and id>name
-    boxes_str, boxes_id = scan_storage(token, '1796')
+    boxes_str, boxes_id = scan_storage(token, '1796')  # Storage: Z23.C (ID: 1796)
     boxes_list = sorted(list(boxes_str.items()), key=lambda x: x[0])
     boxes_data = {box_name: {'id': box_id} for box_name, box_id in boxes_list}
 
@@ -1192,26 +1221,26 @@ def add_pt_stocks():
                     column=pt_header['Description']
                     ).value
                 
-                if vol is None or stock_id:
+                if (vol is None) or stock_id or (box_id is None):
                     continue
                 
                 # TODO get storage_type based on storage_id (Box or Rack Cell)
                                 
                 stock_data= {
-                    "name": prot_name,
-                    "storage_id": box_id,
-                    "storage_type": "Rack Cell",
+                    "name": str(prot_name),
+                    "storage_id": int(box_id),
+                    "storage_type": "System::Storage::Box",
                     "stockable_type": "Biocollections::Protein",
-                    "stockable_id": prot_id,
-                    "description": description,
+                    "stockable_id": int(prot_id),
+                    "description": str(description),
                     # "barcode": "",
                     # "stored_by": "",
-                    "concentration": concentration,
+                    "concentration": str(concentration),
                     "concentration_prefix": "",
                     "concentration_unit_id": 9, # mg/mL
                     "concentration_exponent": "",
                     "concentration_remarks": "",
-                    "volume": vol,
+                    "volume": str(vol),
                     "volume_prefix": "",
                     "volume_unit_id": 8, # uL
                     "volume_exponent": "",
