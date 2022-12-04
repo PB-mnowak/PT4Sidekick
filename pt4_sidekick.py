@@ -7,19 +7,18 @@
 from string import ascii_lowercase, ascii_uppercase
 from os import listdir, getcwd, system
 from os.path import isfile, join
+from getpass import getpass
+import warnings
+
 from Bio import GenBank, BiopythonWarning
 from Bio.Seq import Seq
-from getpass import getpass
-from src.pt4_protein import Protein
-from src.pt4_data import *
 from openpyxl import load_workbook, Workbook
-
-# import json
 import pandas as pd
 import re
-# import time
 import requests
-import warnings
+
+from src.pt4_protein import Protein
+from src.pt4_data import *
 
 # Main menu
 
