@@ -32,8 +32,6 @@ def main():
     test_mode = mode_selection == 'y'
     token = get_token(test_mode=test_mode)
     
-    print(token)
-    # token = None
     pb_all = 'P:\\_research group folders\\PT Proteins\\PT4\\_PT4_sidekick'
 
     warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
